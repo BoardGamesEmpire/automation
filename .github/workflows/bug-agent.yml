@@ -20,10 +20,10 @@ name: Bug agent
 #   against the limits, commits it through the API, opens the PR, and labels
 #   and comments on the issue. bug-agent/publish.sh has the detail.
 #
-# The prompts and the publish script come from this repository's main branch,
-# not from the caller, so a caller sets its limits but not the rules. The
-# Claude API federation rule trusts this file on main (`job_workflow_ref`) for
-# an allowlist of repository ids.
+# The prompts and the publish script come from this repository's master
+# branch, not from the caller, so a caller sets its limits but not the rules.
+# The Claude API federation rule trusts this file on master
+# (`job_workflow_ref`) for an allowlist of repository ids.
 on:
   workflow_call:
     inputs:
@@ -87,7 +87,7 @@ env:
   # Where the prompts and the publish script come from, whichever repository
   # calls. Keep in step with the federation rule's `job_workflow_ref`.
   SHARED_REPOSITORY: BoardGamesEmpire/automation
-  SHARED_REF: main
+  SHARED_REF: master
   SHARED_DIR: .bug-agent-shared
   PROTECTED_PATHS: |
     .github/*

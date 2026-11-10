@@ -21,7 +21,7 @@ in `ready-for-human` with the reason.
 [`.github/workflows/bug-agent.yml`](.github/workflows/bug-agent.yml) explains
 the three jobs and why the agent never holds a token that can write.
 [`bug-agent/`](bug-agent) holds the prompts and the publish script, which the
-workflow always reads from this repository's `main`.
+workflow always reads from this repository's `master`.
 
 ### Calling it
 
@@ -47,7 +47,7 @@ concurrency:
 jobs:
   bug-agent:
     if: github.event.label.name == 'bug' && github.event.sender.type == 'User'
-    uses: BoardGamesEmpire/automation/.github/workflows/bug-agent.yml@main
+    uses: BoardGamesEmpire/automation/.github/workflows/bug-agent.yml@master
     with:
       bge-agent-client-id: ${{ vars.BGE_AGENT_CLIENT_ID }}
       anthropic-federation-rule-id: ${{ vars.ANTHROPIC_FEDERATION_RULE_ID }}
@@ -64,8 +64,8 @@ jobs:
       bge-agent-private-key: ${{ secrets.BGE_AGENT_PRIVATE_KEY }}
 ```
 
-Call it at `@main`: the federation rule matches `job_workflow_ref` on `main`,
-so a caller pinned to a tag or SHA can't get a Claude API token.
+Call it at `@master`: the federation rule matches `job_workflow_ref` on
+`master`, so a caller pinned to a tag or SHA can't get a Claude API token.
 
 `.github/actions/bug-agent-setup/action.yml` is a composite action that
 installs what verifying a fix needs. It must restore caches without saving
@@ -102,7 +102,7 @@ claims.repository_owner_id == "150589533"
 && claims.repository_id in ["1127575497"]
 && claims.event_name == "issues"
 && claims.ref.startsWith("refs/heads/")
-&& claims.job_workflow_ref == "BoardGamesEmpire/automation/.github/workflows/bug-agent.yml@refs/heads/main"
+&& claims.job_workflow_ref == "BoardGamesEmpire/automation/.github/workflows/bug-agent.yml@refs/heads/master"
 ```
 
 Each repository that calls the workflow needs its id in the
