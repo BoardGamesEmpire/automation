@@ -22,9 +22,14 @@ branch="bug-agent/${ISSUE}"
 work="$(mktemp -d)"
 footer=$'\n\n---\n'"Posted by the bug agent. [Workflow run](${RUN_URL})"
 
+# Someone may have labelled the issue `ready-for-agent` before labelling it
+# `bug`, so any other outcome takes that label off as well as `needs-triage`.
 label() {
   gh issue edit "$ISSUE" --repo "$REPO" --add-label "$1" >/dev/null
   gh issue edit "$ISSUE" --repo "$REPO" --remove-label needs-triage >/dev/null 2>&1 || true
+  if [ "$1" != ready-for-agent ]; then
+    gh issue edit "$ISSUE" --repo "$REPO" --remove-label ready-for-agent >/dev/null 2>&1 || true
+  fi
 }
 
 comment() {
