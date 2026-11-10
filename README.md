@@ -18,8 +18,12 @@ ends in one of the triage labels, with one comment on the issue saying why:
 It never applies `wontfix`, and it never merges. Any failure or timeout ends
 in `ready-for-human` with the reason.
 
+The workflow checks the sender's permission itself, so an issue template that
+applies `bug` is safe: a report from someone who can't push starts nothing,
+and the issue stays as filed.
+
 [`.github/workflows/bug-agent.yml`](.github/workflows/bug-agent.yml) explains
-the three jobs and why the agent never holds a token that can write.
+the four jobs and why the agent never holds a token that can write.
 [`bug-agent/`](bug-agent) holds the prompts and the publish script, which the
 workflow always reads from this repository's `master`.
 

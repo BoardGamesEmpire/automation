@@ -6,8 +6,12 @@ name: Bug agent
 # or, when the fix is small and needs no decision, fixes it and opens a draft
 # PR (`ready-for-agent`). README.md covers calling it and the one-time setup.
 #
-# Three jobs, so the agent never holds a token that can write:
+# Four jobs, so the agent never holds a token that can write:
 #
+# - authorize: the agent runs only for a sender who can push. A caller's
+#   `if:` sees who sent the `labeled` event but not their permission, and an
+#   issue template that applies `bug` itself makes whoever opens a report the
+#   sender. Anyone else gets no run, no label and no comment.
 # - triage: the agent reads the issue and the code, with read-only tools, and
 #   returns a decision. No dependency install, so the common outcomes cost
 #   little.
@@ -98,7 +102,37 @@ env:
   REPO_NOTES: ${{ inputs.notes }}
 
 jobs:
+  authorize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      allowed: ${{ steps.check.outputs.allowed }}
+    steps:
+      # Someone outside the repository reads as `read`, and a failed lookup
+      # leaves `allowed` unset, so the agent doesn't run on an error either.
+      - name: Check the sender can push
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SENDER: ${{ github.event.sender.login }}
+        run: |
+          role=$(gh api "repos/$REPO/collaborators/$SENDER/permission" --jq .role_name)
+          case "$role" in
+            admin | maintain | write)
+              echo "allowed=true" >>"$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "$SENDER has the $role role on $REPO, so the bug agent doesn't run."
+              echo "allowed=false" >>"$GITHUB_OUTPUT"
+              ;;
+          esac
+
   triage:
+    needs: authorize
+    if: needs.authorize.outputs.allowed == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -254,8 +288,10 @@ jobs:
           retention-days: 7
 
   publish:
-    needs: [triage, fix]
-    if: always()
+    needs: [authorize, triage, fix]
+    # Past an authorized start, always: a failed or timed-out triage or fix
+    # still ends in a label and a comment.
+    if: always() && needs.authorize.outputs.allowed == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
