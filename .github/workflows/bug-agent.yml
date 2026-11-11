@@ -24,10 +24,16 @@ name: Bug agent
 #   against the limits, commits it through the API, opens the PR, and labels
 #   and comments on the issue. bug-agent/publish.sh has the detail.
 #
-# The prompts and the publish script come from this repository's master
-# branch, not from the caller, so a caller sets its limits but not the rules.
-# The Claude API federation rule trusts this file on master
-# (`job_workflow_ref`) for an allowlist of repository ids.
+# The prompts, the agent runner and the publish script come from this
+# repository's master branch, not from the caller, so a caller sets its limits
+# but not the rules.
+#
+# The agent runs through the Claude Agent SDK (bug-agent/run-agent.mjs) on a
+# Claude API key. Not anthropics/claude-code-action: the action marks its
+# requests as the Claude Code GitHub Action, which promotional credit doesn't
+# cover (BoardGamesEmpire/board-games-empire-backend#1192). Workload identity
+# federation went with the action, so the federation inputs are unused until
+# the runner supports it.
 on:
   workflow_call:
     inputs:
@@ -36,17 +42,17 @@ on:
         type: string
         required: true
       anthropic-federation-rule-id:
-        description: Claude API workload identity federation rule (fdrl_...).
+        description: Claude API workload identity federation rule (fdrl_...). Unused for now; see the header.
         type: string
-        required: true
+        required: false
       anthropic-organization-id:
-        description: Anthropic organization UUID.
+        description: Anthropic organization UUID. Unused for now; see the header.
         type: string
-        required: true
+        required: false
       anthropic-service-account-id:
-        description: Service account the federated token acts as (svac_...).
+        description: Service account the federated token acts as (svac_...). Unused for now; see the header.
         type: string
-        required: true
+        required: false
       fix-tools:
         description: >-
           Claude Code tool rules, comma-separated, for the commands that verify
@@ -86,18 +92,12 @@ on:
         description: The bge-agent GitHub App's private key.
         required: true
       anthropic-api-key:
-        description: >-
-          Claude API key, used instead of workload identity federation when
-          set. Promotional credit pays for key-authenticated requests but not
-          for the federated service account's, which fail with "Credit
-          balance is too low" (BoardGamesEmpire/board-games-empire-backend#1192).
-          Leave it unset to use federation.
-        required: false
+        description: The Claude API key the agent runs on.
+        required: true
 
 env:
   ISSUE_NUMBER: ${{ github.event.issue.number }}
-  # Where the prompts and the publish script come from, whichever repository
-  # calls. Keep in step with the federation rule's `job_workflow_ref`.
+  # Where the prompts and the scripts come from, whichever repository calls.
   SHARED_REPOSITORY: BoardGamesEmpire/automation
   SHARED_REF: master
   SHARED_DIR: .bug-agent-shared
@@ -108,6 +108,11 @@ env:
   MODULE_PATTERN: ${{ inputs.module-pattern }}
   MAX_LINES: ${{ inputs.max-lines }}
   REPO_NOTES: ${{ inputs.notes }}
+  # The model and its reasoning effort are pinned, so they, and what a run
+  # costs, change only here and never with the SDK's or Claude Code's own
+  # defaults.
+  AGENT_MODEL: claude-opus-5-5
+  AGENT_EFFORT: high
 
 jobs:
   authorize:
@@ -146,9 +151,6 @@ jobs:
     permissions:
       contents: read
       issues: read
-      # The GitHub OIDC token the action exchanges for a short-lived Claude
-      # API token (workload identity federation).
-      id-token: write
     outputs:
       outcome: ${{ steps.outcome.outputs.outcome }}
       decision: ${{ steps.agent.outputs.structured_output }}
@@ -165,61 +167,50 @@ jobs:
           sparse-checkout: bug-agent
           persist-credentials: false
 
+      # The runner and the SDK live outside the checkout, so the agent's
+      # working tree holds only the calling repository.
       - name: Build the prompt
-        id: prompt
         run: |
-          delim="EOF_$(openssl rand -hex 16)"
-          {
-            echo "text<<$delim"
-            bash "$SHARED_DIR/bug-agent/prompt.sh" triage
-            echo "$delim"
-          } >> "$GITHUB_OUTPUT"
+          bash "$SHARED_DIR/bug-agent/prompt.sh" triage > "$RUNNER_TEMP/prompt.md"
+          cp -R "$SHARED_DIR/bug-agent" "$RUNNER_TEMP/bug-agent"
           rm -rf "$SHARED_DIR"
+
+      - name: Install the Agent SDK
+        working-directory: ${{ runner.temp }}/bug-agent
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      # As in triage.
+      - name: Install subprocess isolation
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends bubblewrap socat
+          if [ -f /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+
+      # The runner sets CLAUDE_CODE_SUBPROCESS_ENV_SCRUB, which keeps the API
+      # key out of the agent's commands by running them under bubblewrap.
+      # Claude Code refuses to start without it, and Ubuntu 24.04 blocks the
+      # unprivileged user namespaces it needs. The same setup
+      # anthropics/claude-code-action does for untrusted senders.
+      - name: Install subprocess isolation
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends bubblewrap socat
+          if [ -f /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
 
       - name: Run the agent
         id: agent
-        uses: anthropics/claude-code-action@925afb53776cf1a2b738c6bdbed37b4d4000ef13 # v1.0.262
         env:
+          ANTHROPIC_API_KEY: ${{ secrets.anthropic-api-key }}
           GH_TOKEN: ${{ github.token }}
-          # Keeps credentials out of the commands the agent runs.
-          CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1'
-        with:
-          # Workload identity federation by default: the action trades this
-          # job's GitHub OIDC token for a Claude API token that lasts minutes,
-          # so nothing long-lived exists to leak. The federation inputs are
-          # identifiers, not secrets. A caller's `anthropic-api-key` replaces
-          # federation (see its description); the federation inputs are then
-          # left empty, because the action prefers a key and warns when it
-          # gets both.
-          anthropic_api_key: ${{ secrets.anthropic-api-key }}
-          anthropic_federation_rule_id: ${{ secrets.anthropic-api-key == '' && inputs.anthropic-federation-rule-id || '' }}
-          anthropic_organization_id: ${{ secrets.anthropic-api-key == '' && inputs.anthropic-organization-id || '' }}
-          anthropic_service_account_id: ${{ secrets.anthropic-api-key == '' && inputs.anthropic-service-account-id || '' }}
-          github_token: ${{ github.token }}
-          prompt: ${{ steps.prompt.outputs.text }}
-          # The model and its reasoning effort are pinned, so they, and what a
-          # run costs, change only here and never with the action's or Claude
-          # Code's own defaults.
-          claude_args: |
-            --model claude-opus-5-5
-            --effort high
-            --max-turns 40
-            --allowedTools "Read,Glob,Grep,Bash(gh issue view:*),Bash(git log:*)"
-            --json-schema '{"type":"object","properties":{"outcome":{"type":"string","enum":["needs-info","ready-for-human","ready-for-agent"]},"comment":{"type":"string"}},"required":["outcome","comment"],"additionalProperties":false}'
-
-      # The action hides Claude's output in the log, so a run that the API
-      # turns down fails with only "did not return structured_output". The
-      # result message's text is then the API's error, not anything the agent
-      # wrote, so it is safe to print in a public repository's log.
-      - name: Show the API's error
-        if: failure() && steps.agent.outputs.execution_file != ''
-        env:
-          EXECUTION_FILE: ${{ steps.agent.outputs.execution_file }}
-        run: |
-          error="$(jq -rs '[.. | objects | select(.type? == "result")] | last | select(.is_error == true) | .result // empty' "$EXECUTION_FILE" 2>/dev/null || true)"
-          if [ -n "$error" ]; then
-            echo "::error title=Claude API::$(head -c 500 <<<"$error" | tr '\n' ' ')"
-          fi
+          PROMPT_FILE: ${{ runner.temp }}/prompt.md
+          AGENT_MAX_TURNS: '40'
+          AGENT_ALLOWED_TOOLS: Read,Glob,Grep,Bash(gh issue view:*),Bash(git log:*)
+          AGENT_SCHEMA: '{"type":"object","properties":{"outcome":{"type":"string","enum":["needs-info","ready-for-human","ready-for-agent"]},"comment":{"type":"string"}},"required":["outcome","comment"],"additionalProperties":false}'
+        run: node "$RUNNER_TEMP/bug-agent/run-agent.mjs"
 
       - name: Read the outcome
         id: outcome
@@ -240,7 +231,6 @@ jobs:
     permissions:
       contents: read
       issues: read
-      id-token: write
     outputs:
       result: ${{ steps.agent.outputs.structured_output }}
     steps:
@@ -260,55 +250,37 @@ jobs:
       # save any cache.
       - uses: ./.github/actions/bug-agent-setup
 
-      # The shared checkout is removed before the agent starts, so the fix
-      # collected below holds only the agent's changes.
+      # The shared checkout is removed before the agent starts, and the
+      # runner and the SDK live outside the checkout, so the fix collected
+      # below holds only the agent's changes.
       - name: Build the prompt
-        id: prompt
         env:
           DECISION: ${{ needs.triage.outputs.decision }}
         run: |
-          delim="EOF_$(openssl rand -hex 16)"
           {
-            echo "text<<$delim"
             bash "$SHARED_DIR/bug-agent/prompt.sh" fix
             echo
             echo "## The triage run's reasoning"
             echo
             jq -r '.comment' <<<"$DECISION"
-            echo "$delim"
-          } >> "$GITHUB_OUTPUT"
+          } > "$RUNNER_TEMP/prompt.md"
+          cp -R "$SHARED_DIR/bug-agent" "$RUNNER_TEMP/bug-agent"
           rm -rf "$SHARED_DIR"
+
+      - name: Install the Agent SDK
+        working-directory: ${{ runner.temp }}/bug-agent
+        run: npm ci --ignore-scripts --no-audit --no-fund
 
       - name: Run the agent
         id: agent
-        uses: anthropics/claude-code-action@925afb53776cf1a2b738c6bdbed37b4d4000ef13 # v1.0.262
         env:
+          ANTHROPIC_API_KEY: ${{ secrets.anthropic-api-key }}
           GH_TOKEN: ${{ github.token }}
-          CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1'
-        with:
-          anthropic_api_key: ${{ secrets.anthropic-api-key }}
-          anthropic_federation_rule_id: ${{ secrets.anthropic-api-key == '' && inputs.anthropic-federation-rule-id || '' }}
-          anthropic_organization_id: ${{ secrets.anthropic-api-key == '' && inputs.anthropic-organization-id || '' }}
-          anthropic_service_account_id: ${{ secrets.anthropic-api-key == '' && inputs.anthropic-service-account-id || '' }}
-          github_token: ${{ github.token }}
-          prompt: ${{ steps.prompt.outputs.text }}
-          claude_args: |
-            --model claude-opus-5-5
-            --effort high
-            --max-turns 80
-            --allowedTools "Read,Edit,Write,Glob,Grep,Bash(gh issue view:*),Bash(git status:*),Bash(git diff:*),Bash(git log:*),${{ inputs.fix-tools }}"
-            --json-schema '{"type":"object","properties":{"outcome":{"type":"string","enum":["fixed","ready-for-human"]},"comment":{"type":"string"},"commit_subject":{"type":"string"},"commit_body":{"type":"string"},"pr_body":{"type":"string"}},"required":["outcome","comment","commit_subject","commit_body","pr_body"],"additionalProperties":false}'
-
-      # As in triage.
-      - name: Show the API's error
-        if: failure() && steps.agent.outputs.execution_file != ''
-        env:
-          EXECUTION_FILE: ${{ steps.agent.outputs.execution_file }}
-        run: |
-          error="$(jq -rs '[.. | objects | select(.type? == "result")] | last | select(.is_error == true) | .result // empty' "$EXECUTION_FILE" 2>/dev/null || true)"
-          if [ -n "$error" ]; then
-            echo "::error title=Claude API::$(head -c 500 <<<"$error" | tr '\n' ' ')"
-          fi
+          PROMPT_FILE: ${{ runner.temp }}/prompt.md
+          AGENT_MAX_TURNS: '80'
+          AGENT_ALLOWED_TOOLS: Read,Edit,Write,Glob,Grep,Bash(gh issue view:*),Bash(git status:*),Bash(git diff:*),Bash(git log:*),${{ inputs.fix-tools }}
+          AGENT_SCHEMA: '{"type":"object","properties":{"outcome":{"type":"string","enum":["fixed","ready-for-human"]},"comment":{"type":"string"},"commit_subject":{"type":"string"},"commit_body":{"type":"string"},"pr_body":{"type":"string"}},"required":["outcome","comment","commit_subject","commit_body","pr_body"],"additionalProperties":false}'
+        run: node "$RUNNER_TEMP/bug-agent/run-agent.mjs"
 
       # The working tree's changes, as the agent left them. Whatever the
       # caller's setup action writes must be gitignored, or it lands in the

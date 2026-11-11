@@ -54,9 +54,6 @@ jobs:
     uses: BoardGamesEmpire/automation/.github/workflows/bug-agent.yml@master
     with:
       bge-agent-client-id: ${{ vars.BGE_AGENT_CLIENT_ID }}
-      anthropic-federation-rule-id: ${{ vars.ANTHROPIC_FEDERATION_RULE_ID }}
-      anthropic-organization-id: ${{ vars.ANTHROPIC_ORGANIZATION_ID }}
-      anthropic-service-account-id: ${{ vars.ANTHROPIC_SERVICE_ACCOUNT_ID }}
       fix-tools: 'Bash(npm test:*)'
       protected-paths: |
         package.json
@@ -69,8 +66,10 @@ jobs:
       anthropic-api-key: ${{ secrets.BGE_AGENT_ANTHROPIC_API_KEY }}
 ```
 
-Call it at `@master`: the federation rule matches `job_workflow_ref` on
-`master`, so a caller pinned to a tag or SHA can't get a Claude API token.
+Call it at `@master`, unpinned: the prompts and scripts come from `master`
+whatever ref the caller names, so a pin wouldn't freeze them, and workload
+identity federation, when it returns, trusts `job_workflow_ref` on `master`
+only.
 
 `.github/actions/bug-agent-setup/action.yml` is a composite action that
 installs what verifying a fix needs. It must restore caches without saving
@@ -95,34 +94,16 @@ requests, installed on each calling repository. Its client ID goes in the
 `BGE_AGENT_PRIVATE_KEY` secret, at organization level so every caller shares
 them.
 
-**Claude API**, through workload identity federation, so no API key is stored.
-In the Claude Console, under Settings → Workload identity, register GitHub
-Actions as an issuer (`https://token.actions.githubusercontent.com`,
-discovery), create a service account in a workspace with a spend limit, and
-create a rule targeting it with audience `https://api.anthropic.com`, scope
-`workspace:developer` and this condition:
+**Claude API key**: create a key in a workspace with a spend limit and store
+it in the organization secret `BGE_AGENT_ANTHROPIC_API_KEY`, limited to the
+calling repositories. The agent runs through the Claude Agent SDK
+(`bug-agent/run-agent.mjs`), which keeps the key out of the agent's commands
+by running them under bubblewrap.
 
-```text
-claims.repository_owner_id == "150589533"
-&& claims.repository_id in ["1127575497"]
-&& claims.event_name == "issues"
-&& claims.ref.startsWith("refs/heads/")
-&& claims.job_workflow_ref == "BoardGamesEmpire/automation/.github/workflows/bug-agent.yml@refs/heads/master"
-```
-
-Each repository that calls the workflow needs its id in the
-`repository_id` list (`gh api repos/<owner>/<repo> --jq .id`). The rule's,
-organization's and service account's ids go in the
-`ANTHROPIC_FEDERATION_RULE_ID`, `ANTHROPIC_ORGANIZATION_ID` and
-`ANTHROPIC_SERVICE_ACCOUNT_ID` variables. They identify, they don't
-authenticate, so they aren't secrets.
-
-**Claude API key, while promotional credit is in use.** Promotional credit
-pays for requests made with an API key but not for the federated service
-account's, which the API turns down with "Credit balance is too low"
-(BoardGamesEmpire/board-games-empire-backend#1192). Until that changes,
-create a key in the same workspace and store it in the organization secret
-`BGE_AGENT_ANTHROPIC_API_KEY`, limited to the calling repositories. A caller
-passes it as `anthropic-api-key`, and the workflow then uses the key instead
-of federation. Deleting the secret switches back to federation with no code
-change.
+Not `anthropics/claude-code-action`, and not workload identity federation for
+now. The action marks every request as the Claude Code GitHub Action, which
+promotional credit doesn't cover: the same key and prompt succeed without
+that mark and fail with "Credit balance is too low" with it
+(BoardGamesEmpire/board-games-empire-backend#1192). Federation came with the
+action, so it waits until the runner supports it; the workflow still accepts
+the `anthropic-federation-*` inputs and ignores them.
