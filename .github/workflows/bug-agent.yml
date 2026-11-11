@@ -130,6 +130,21 @@ jobs:
     outputs:
       allowed: ${{ steps.check.outputs.allowed }}
     steps:
+      # A `number` input takes any number, but prompt.sh and publish.sh
+      # compare these with Bash's integer tests, which a value like 1.5 breaks:
+      # every fix would go to a person, after the agent had already run. A bad
+      # value fails here instead, before `allowed` is set, so nothing runs.
+      - name: Check the limits are whole numbers
+        run: |
+          status=0
+          for limit in "max-modules=$MAX_MODULES" "max-lines=$MAX_LINES"; do
+            if ! [[ "${limit#*=}" =~ ^[0-9]+$ ]]; then
+              echo "::error::${limit%%=*} must be a non-negative whole number; it is ${limit#*=}."
+              status=1
+            fi
+          done
+          exit "$status"
+
       # Someone outside the repository reads as `read`, and a failed lookup
       # leaves `allowed` unset, so the agent doesn't run on an error either.
       - name: Check the sender can push
