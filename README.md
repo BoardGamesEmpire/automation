@@ -42,7 +42,6 @@ on:
 permissions:
   contents: read
   issues: read
-  id-token: write
 
 concurrency:
   group: bug-agent-${{ github.event.issue.number }}
@@ -82,7 +81,8 @@ writes must be gitignored, or it lands in the fix.
 | `fix-tools`       | Claude Code tool rules, comma-separated, for the verify commands               |
 | `protected-paths` | Shell globs a fix may not change; `.github/*` is always protected              |
 | `test-paths`      | Shell globs of test files, which don't count toward the line limit             |
-| `module-pattern`  | Bash regex whose first group names a path's module; at most one module per fix |
+| `module-pattern`  | Bash regex whose first group names a path's module; empty turns the check off  |
+| `max-modules`     | Most modules a fix may change, by `module-pattern` (default 1)                 |
 | `max-lines`       | Most changed lines outside tests (default 100)                                 |
 | `notes`           | Where the repository's agent instructions live, and the verify commands        |
 

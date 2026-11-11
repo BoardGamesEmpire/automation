@@ -4,7 +4,7 @@
 # notes come from the environment, as the reusable workflow sets them.
 #
 # Environment: GITHUB_REPOSITORY, ISSUE_NUMBER, PROTECTED_PATHS, TEST_PATHS,
-# MODULE_PATTERN, MAX_LINES, REPO_NOTES.
+# MODULE_PATTERN, MAX_MODULES, MAX_LINES, REPO_NOTES.
 set -euo pipefail
 
 mode="$1"
@@ -32,7 +32,12 @@ else
 fi
 if [ -n "${MODULE_PATTERN:-}" ]; then
   echo
-  echo "A fix may change at most one module, where a path's module is the first"
+  if [ "${MAX_MODULES:-1}" -eq 1 ]; then
+    modules="one module"
+  else
+    modules="${MAX_MODULES} modules"
+  fi
+  echo "A fix may change at most ${modules}, where a path's module is the first"
   echo "group of this regular expression: \`${MODULE_PATTERN}\`."
 fi
 if [ -n "${REPO_NOTES:-}" ]; then
