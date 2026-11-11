@@ -196,6 +196,20 @@ jobs:
             --allowedTools "Read,Glob,Grep,Bash(gh issue view:*),Bash(git log:*)"
             --json-schema '{"type":"object","properties":{"outcome":{"type":"string","enum":["needs-info","ready-for-human","ready-for-agent"]},"comment":{"type":"string"}},"required":["outcome","comment"],"additionalProperties":false}'
 
+      # The action hides Claude's output in the log, so a run that the API
+      # turns down fails with only "did not return structured_output". The
+      # result message's text is then the API's error, not anything the agent
+      # wrote, so it is safe to print in a public repository's log.
+      - name: Show the API's error
+        if: failure() && steps.agent.outputs.execution_file != ''
+        env:
+          EXECUTION_FILE: ${{ steps.agent.outputs.execution_file }}
+        run: |
+          error="$(jq -rs '[.. | objects | select(.type? == "result")] | last | select(.is_error == true) | .result // empty' "$EXECUTION_FILE" 2>/dev/null || true)"
+          if [ -n "$error" ]; then
+            echo "::error title=Claude API::$(head -c 500 <<<"$error" | tr '\n' ' ')"
+          fi
+
       - name: Read the outcome
         id: outcome
         env:
@@ -272,6 +286,17 @@ jobs:
             --max-turns 80
             --allowedTools "Read,Edit,Write,Glob,Grep,Bash(gh issue view:*),Bash(git status:*),Bash(git diff:*),Bash(git log:*),${{ inputs.fix-tools }}"
             --json-schema '{"type":"object","properties":{"outcome":{"type":"string","enum":["fixed","ready-for-human"]},"comment":{"type":"string"},"commit_subject":{"type":"string"},"commit_body":{"type":"string"},"pr_body":{"type":"string"}},"required":["outcome","comment","commit_subject","commit_body","pr_body"],"additionalProperties":false}'
+
+      # As in triage.
+      - name: Show the API's error
+        if: failure() && steps.agent.outputs.execution_file != ''
+        env:
+          EXECUTION_FILE: ${{ steps.agent.outputs.execution_file }}
+        run: |
+          error="$(jq -rs '[.. | objects | select(.type? == "result")] | last | select(.is_error == true) | .result // empty' "$EXECUTION_FILE" 2>/dev/null || true)"
+          if [ -n "$error" ]; then
+            echo "::error title=Claude API::$(head -c 500 <<<"$error" | tr '\n' ' ')"
+          fi
 
       # The working tree's changes, as the agent left them. Whatever the
       # caller's setup action writes must be gitignored, or it lands in the
