@@ -179,15 +179,6 @@ jobs:
         working-directory: ${{ runner.temp }}/bug-agent
         run: npm ci --ignore-scripts --no-audit --no-fund
 
-      # As in triage.
-      - name: Install subprocess isolation
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends bubblewrap socat
-          if [ -f /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
-            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-          fi
-
       # The runner sets CLAUDE_CODE_SUBPROCESS_ENV_SCRUB, which keeps the API
       # key out of the agent's commands by running them under bubblewrap.
       # Claude Code refuses to start without it, and Ubuntu 24.04 blocks the
@@ -270,6 +261,15 @@ jobs:
       - name: Install the Agent SDK
         working-directory: ${{ runner.temp }}/bug-agent
         run: npm ci --ignore-scripts --no-audit --no-fund
+
+      # As in triage.
+      - name: Install subprocess isolation
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends bubblewrap socat
+          if [ -f /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
 
       - name: Run the agent
         id: agent
