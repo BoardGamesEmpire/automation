@@ -85,6 +85,14 @@ on:
       bge-agent-private-key:
         description: The bge-agent GitHub App's private key.
         required: true
+      anthropic-api-key:
+        description: >-
+          Claude API key, used instead of workload identity federation when
+          set. Promotional credit pays for key-authenticated requests but not
+          for the federated service account's, which fail with "Credit
+          balance is too low" (BoardGamesEmpire/board-games-empire-backend#1192).
+          Leave it unset to use federation.
+        required: false
 
 env:
   ISSUE_NUMBER: ${{ github.event.issue.number }}
@@ -176,14 +184,17 @@ jobs:
           # Keeps credentials out of the commands the agent runs.
           CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1'
         with:
-          # Workload identity federation, not a stored API key: the action
-          # trades this job's GitHub OIDC token for a Claude API token that
-          # lasts minutes, so nothing long-lived exists to leak. These are
-          # identifiers, not secrets. Setting `anthropic_api_key` alongside
-          # them would silently win over them.
-          anthropic_federation_rule_id: ${{ inputs.anthropic-federation-rule-id }}
-          anthropic_organization_id: ${{ inputs.anthropic-organization-id }}
-          anthropic_service_account_id: ${{ inputs.anthropic-service-account-id }}
+          # Workload identity federation by default: the action trades this
+          # job's GitHub OIDC token for a Claude API token that lasts minutes,
+          # so nothing long-lived exists to leak. The federation inputs are
+          # identifiers, not secrets. A caller's `anthropic-api-key` replaces
+          # federation (see its description); the federation inputs are then
+          # left empty, because the action prefers a key and warns when it
+          # gets both.
+          anthropic_api_key: ${{ secrets.anthropic-api-key }}
+          anthropic_federation_rule_id: ${{ secrets.anthropic-api-key == '' && inputs.anthropic-federation-rule-id || '' }}
+          anthropic_organization_id: ${{ secrets.anthropic-api-key == '' && inputs.anthropic-organization-id || '' }}
+          anthropic_service_account_id: ${{ secrets.anthropic-api-key == '' && inputs.anthropic-service-account-id || '' }}
           github_token: ${{ github.token }}
           prompt: ${{ steps.prompt.outputs.text }}
           # The model and its reasoning effort are pinned, so they, and what a
@@ -275,9 +286,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1'
         with:
-          anthropic_federation_rule_id: ${{ inputs.anthropic-federation-rule-id }}
-          anthropic_organization_id: ${{ inputs.anthropic-organization-id }}
-          anthropic_service_account_id: ${{ inputs.anthropic-service-account-id }}
+          anthropic_api_key: ${{ secrets.anthropic-api-key }}
+          anthropic_federation_rule_id: ${{ secrets.anthropic-api-key == '' && inputs.anthropic-federation-rule-id || '' }}
+          anthropic_organization_id: ${{ secrets.anthropic-api-key == '' && inputs.anthropic-organization-id || '' }}
+          anthropic_service_account_id: ${{ secrets.anthropic-api-key == '' && inputs.anthropic-service-account-id || '' }}
           github_token: ${{ github.token }}
           prompt: ${{ steps.prompt.outputs.text }}
           claude_args: |

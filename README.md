@@ -66,6 +66,7 @@ jobs:
         Verify with `npm test`.
     secrets:
       bge-agent-private-key: ${{ secrets.BGE_AGENT_PRIVATE_KEY }}
+      anthropic-api-key: ${{ secrets.BGE_AGENT_ANTHROPIC_API_KEY }}
 ```
 
 Call it at `@master`: the federation rule matches `job_workflow_ref` on
@@ -115,3 +116,13 @@ organization's and service account's ids go in the
 `ANTHROPIC_FEDERATION_RULE_ID`, `ANTHROPIC_ORGANIZATION_ID` and
 `ANTHROPIC_SERVICE_ACCOUNT_ID` variables. They identify, they don't
 authenticate, so they aren't secrets.
+
+**Claude API key, while promotional credit is in use.** Promotional credit
+pays for requests made with an API key but not for the federated service
+account's, which the API turns down with "Credit balance is too low"
+(BoardGamesEmpire/board-games-empire-backend#1192). Until that changes,
+create a key in the same workspace and store it in the organization secret
+`BGE_AGENT_ANTHROPIC_API_KEY`, limited to the calling repositories. A caller
+passes it as `anthropic-api-key`, and the workflow then uses the key instead
+of federation. Deleting the secret switches back to federation with no code
+change.
