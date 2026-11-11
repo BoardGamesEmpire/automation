@@ -15,7 +15,7 @@
 # TRIAGE_RESULT, TRIAGE_JSON, FIX_RESULT, FIX_JSON, PATCH_FILE, and the
 # calling repository's limits: PROTECTED_PATHS and TEST_PATHS (shell globs,
 # one per line), MODULE_PATTERN (bash regex, first group names the module;
-# empty for no module check) and MAX_LINES.
+# empty for no module check), MAX_MODULES and MAX_LINES.
 set -Eeuo pipefail
 
 branch="bug-agent/${ISSUE}"
@@ -108,8 +108,9 @@ while IFS= read -r path; do
 done < <(git diff --cached --no-renames --name-only)
 
 module_count="$(printf '%s\n' "${modules[@]+"${modules[@]}"}" | { grep . || true; } | sort -u | wc -l | tr -d ' ')"
-[ "$module_count" -le 1 ] ||
-  reasons+=("- It changes $module_count modules; the limit is one.")
+max_modules="${MAX_MODULES:-1}"
+[ "$module_count" -le "$max_modules" ] ||
+  reasons+=("- It changes $module_count modules; the limit is $max_modules.")
 
 lines=0
 while IFS=$'\t' read -r added removed path; do

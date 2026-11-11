@@ -74,9 +74,15 @@ on:
       module-pattern:
         description: >-
           Bash regex whose first group names a path's module. A fix may change
-          at most one module. Empty turns the check off.
+          at most `max-modules` modules. Empty turns the check off.
         type: string
         default: ''
+      max-modules:
+        description: >-
+          Most modules a fix may change, by `module-pattern`. Paths the
+          pattern doesn't match count toward none.
+        type: number
+        default: 1
       max-lines:
         description: Most changed lines a fix may have outside test files.
         type: number
@@ -106,6 +112,7 @@ env:
     ${{ inputs.protected-paths }}
   TEST_PATHS: ${{ inputs.test-paths }}
   MODULE_PATTERN: ${{ inputs.module-pattern }}
+  MAX_MODULES: ${{ inputs.max-modules }}
   MAX_LINES: ${{ inputs.max-lines }}
   REPO_NOTES: ${{ inputs.notes }}
   # The model and its reasoning effort are pinned, so they, and what a run
