@@ -43,13 +43,13 @@ permissions:
   contents: read
   issues: read
 
-concurrency:
-  group: bug-agent-${{ github.event.issue.number }}
-  cancel-in-progress: false
-
 jobs:
   bug-agent:
     if: github.event.label.name == 'bug' && github.event.sender.type == 'User'
+    concurrency:
+      group: bug-agent-${{ github.event.issue.number }}
+      cancel-in-progress: false
+      queue: max
     uses: BoardGamesEmpire/automation/.github/workflows/bug-agent.yml@master
     with:
       bge-agent-client-id: ${{ vars.BGE_AGENT_CLIENT_ID }}
@@ -64,6 +64,14 @@ jobs:
       bge-agent-private-key: ${{ secrets.BGE_AGENT_PRIVATE_KEY }}
       anthropic-api-key: ${{ secrets.BGE_AGENT_ANTHROPIC_API_KEY }}
 ```
+
+Every `labeled` event starts the caller, whatever the label, the agent's own
+triage labels included. By default, a run that joins a concurrency group
+cancels the run already pending there. So the group sits on the job: a job
+whose `if` skips it never joins. `queue: max` lets a later `bug` run wait
+behind one that is already waiting, instead of replacing it. actionlint
+doesn't recognise `queue` yet and reports it as an unknown key. The key is
+valid.
 
 Call it at `@master`, unpinned: the prompts and scripts come from `master`
 whatever ref the caller names, so a pin wouldn't freeze them, and workload
