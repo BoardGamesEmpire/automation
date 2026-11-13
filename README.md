@@ -82,7 +82,9 @@ only.
 installs what verifying a fix needs. It must restore caches without saving
 them: the job runs code the agent wrote, and an issue-triggered job saves into
 the default branch's cache scope, which that branch's CI restores. Whatever it
-writes must be gitignored, or it lands in the fix.
+writes must be gitignored, or it lands in the fix. For a toolchain that writes
+outside the checkout or inside its own install, see
+[What the agent's commands can write](#what-the-agents-commands-can-write).
 
 | Input             | Meaning                                                                        |
 | ----------------- | ------------------------------------------------------------------------------ |
@@ -93,6 +95,58 @@ writes must be gitignored, or it lands in the fix.
 | `max-modules`     | Most modules a fix may change, by `module-pattern` (default 1)                 |
 | `max-lines`       | Most changed lines outside tests (default 100)                                 |
 | `notes`           | Where the repository's agent instructions live, and the verify commands        |
+
+### What the agent's commands can write
+
+The agent's commands run under bubblewrap, in the isolation that
+`CLAUDE_CODE_SUBPROCESS_ENV_SCRUB` turns on. That isolation belongs to Claude
+Code, not to this workflow, so an SDK bump can change it. This describes
+Claude Code 2.1.310, bundled with `@anthropic-ai/claude-agent-sdk@0.3.310`. A
+[probe run](https://github.com/BoardGamesEmpire/board-games-empire-client/actions/runs/43338050294)
+confirmed the part a toolchain runs into: the checkout is writable, and a
+`PATH` directory inside it is read-only.
+
+The commands have no network. They can write anything under the writable
+roots, `/home`, `/root`, `/tmp`, `/var`, `/opt`, `/run` and `/mnt`, apart from
+a deny list. On a GitHub-hosted runner, those roots hold the checkout, `HOME`
+and the tool cache. A path on the deny list is read-only, and one that doesn't
+exist yet can't be created. If its parent is missing too, the block starts
+there: a missing `~/.local` can't be created at all. The list includes:
+
+- `HOME`'s shell dotfiles, `~/.claude`, `~/.ssh`, `~/.netrc`, `~/.gitconfig`,
+  `~/.config/gh`, `~/.config/git`, package managers' config files and
+  `~/.local/bin`;
+- the checkout's `package.json`, Node lockfiles and package-manager config,
+  `node_modules/.bin`, `.env*`, `scripts/`, `.github`, `.claude`, `.mcp.json`,
+  `.gitmodules`, `.git/hooks`, `.git/config` and git's other config files;
+- the runner's file-command directory, the action path and the event file;
+- **every `PATH` directory under the writable roots, as `PATH` stood when the
+  agent started.**
+
+So a toolchain that writes inside its own install fails if its `bin` is on
+`PATH`. Flutter does: it writes its `bin/cache` on every run. Keep the
+toolchain's own `bin` off `PATH`, and put a directory of wrapper scripts
+(shims) there instead, each of which execs the real binary. A later step can't
+take back a `GITHUB_PATH` entry, so no setup step may add the toolchain's
+`bin`, the one that installs it included. A setup-action step after the
+install then puts the wrappers on `PATH`. For Flutter, with `FLUTTER_ROOT`
+naming the SDK's directory:
+
+```bash
+shims=$RUNNER_TEMP/bug-agent-bin
+mkdir -p "$shims"
+for tool in flutter dart; do
+  printf '#!/usr/bin/env bash\nexec %q "$@"\n' "$FLUTTER_ROOT/bin/$tool" > "$shims/$tool"
+  chmod +x "$shims/$tool"
+done
+echo "$shims" >> "$GITHUB_PATH"
+```
+
+To re-check after an SDK bump, run a script that tries those writes as a
+command the agent runs, through `run-agent.mjs` with the fix job's options.
+BoardGamesEmpire/board-games-empire-client's "Bug agent isolation probe"
+workflow does that. This repository has no check of its own until
+[#7](https://github.com/BoardGamesEmpire/automation/issues/7) lands.
 
 ### One-time setup
 
